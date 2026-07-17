@@ -12,55 +12,90 @@ const shockwave = document.getElementById('shockwave-effect');
 const startBtn = document.getElementById('start-experience-btn');
 const blackScreen = document.getElementById('cinematic-black-screen');
 
-// --- YOUTUBE IFRAME AUDIO ENGINE ---
-let playerBeep, playerMotor, playerMusic;
+// --- NATIVE AUDIO ENGINE (No YouTube — 100% reliable) ---
+const audioMotor = document.getElementById('audio-motor');
+const audioMusic = document.getElementById('audio-music');
 
-// This function is automatically called by the YouTube IFrame API when it finishes loading
-function onYouTubeIframeAPIReady() {
-    // 1. Beeping Sequence
-    playerBeep = new YT.Player('player-beep', {
-        videoId: 'KFNhJnp7eQ0',
-        playerVars: { 'playsinline': 1, 'controls': 0, 'modestbranding': 1, 'disablekb': 1 }
-    });
-    // 2. Motorcycle Riding (Loops)
-    playerMotor = new YT.Player('player-motor', {
-        videoId: 'sruRnTtDq34',
-        playerVars: { 'playsinline': 1, 'controls': 0, 'modestbranding': 1, 'loop': 1, 'playlist': 'sruRnTtDq34' }
-    });
-    // 3. Romantic Music
-    playerMusic = new YT.Player('player-music', {
-        videoId: 'PWXhO29bIL8',
-        playerVars: { 'playsinline': 1, 'controls': 0, 'modestbranding': 1 }
-    });
+// Web Audio API context for synthesized beep (no file needed)
+let audioCtx = null;
+
+// Synthesize a notification beep using oscillators
+function playBeep() {
+    try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        const now = audioCtx.currentTime;
+        
+        // Play 3 ascending beeps like an order notification
+        [0, 0.25, 0.5].forEach((delay, i) => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.type = 'sine';
+            osc.frequency.value = 800 + (i * 200); // 800, 1000, 1200 Hz
+            gain.gain.setValueAtTime(0.3, now + delay);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.2);
+            
+            osc.start(now + delay);
+            osc.stop(now + delay + 0.2);
+        });
+
+        // Play a sustained confirmation tone after the beeps
+        setTimeout(() => {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.type = 'sine';
+            osc.frequency.value = 1400;
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.6);
+        }, 1000);
+    } catch (e) { console.warn('Beep skipped:', e); }
 }
 
-// Fade audio out smoothly (like Premiere audio keyframes)
-function fadeAudioOut(player, durationMs) {
-    let vol = player.getVolume();
-    const interval = 50; 
-    const step = vol / (durationMs / interval);
-    
-    const fade = setInterval(() => {
-        vol -= step;
-        if (vol <= 0) {
-            player.setVolume(0);
-            player.pauseVideo();
-            clearInterval(fade);
-        } else {
-            player.setVolume(vol);
-        }
-    }, interval);
+// Play an audio element at a given volume (0 to 1)
+function playAudio(audio, volume) {
+    try {
+        audio.volume = volume;
+        audio.currentTime = 0;
+        audio.play().catch(e => console.warn('Audio play blocked:', e));
+    } catch (e) { console.warn('Audio error:', e); }
+}
+
+// Fade an audio element out smoothly over durationMs
+function fadeAudioOut(audio, durationMs) {
+    try {
+        const interval = 50;
+        const step = audio.volume / (durationMs / interval);
+        
+        const fade = setInterval(() => {
+            if (audio.volume - step <= 0) {
+                audio.volume = 0;
+                audio.pause();
+                clearInterval(fade);
+            } else {
+                audio.volume -= step;
+            }
+        }, interval);
+    } catch (e) { console.warn('Fade out skipped:', e); }
 }
 
 // --- START SEQUENCE TRIGGER ---
 startBtn.addEventListener('click', () => {
     // 1. Hide the button and fade the black screen out
     startBtn.style.opacity = 0;
+    startBtn.style.pointerEvents = 'none';
     blackScreen.classList.add('reveal-scene');
     
-    // 2. Start the Beep Audio
-    playerBeep.setVolume(100);
-    playerBeep.playVideo();
+    // 2. Play the notification beep (synthesized — no file needed)
+    playBeep();
 
     // 3. Start the intro animations
     setTimeout(() => {
@@ -112,9 +147,8 @@ function runIntroSequence() {
         introPhase.classList.add('slide-up-out');
         
         // FADE OUT BEEP, START MOTORCYCLE
-        fadeAudioOut(playerBeep, 1000);
-        playerMotor.setVolume(80); // Mix it slightly lower so it's not overwhelming
-        playerMotor.playVideo();
+        // (beep is synthesized, so nothing to fade — just start motor)
+        playAudio(audioMotor, 0.7);
         
         let safetyCounter = 0;
         const checkReady = setInterval(() => {
@@ -126,9 +160,14 @@ function runIntroSequence() {
                     startDeliveryAnimation(globalAnimationFrames);
                 }, 1000); 
             }
+            // Fallback: if route never loads, force-proceed after 5 seconds
             if (safetyCounter > 50 && !globalAnimationFrames) {
                 clearInterval(checkReady);
                 introPhase.classList.add('hidden');
+                // Create a simple straight-line fallback so delivery still runs
+                const fallbackPath = [guiwanCoords, maasinCoords];
+                globalAnimationFrames = getEquidistantPoints(fallbackPath, 500);
+                startDeliveryAnimation(globalAnimationFrames);
             }
         }, 100);
     }, 6500);
@@ -212,7 +251,7 @@ function startDeliveryAnimation(animationFrames) {
             deliveryPhase.classList.add('camera-shake');
             
             // Fade out the motorcycle engine!
-            fadeAudioOut(playerMotor, 1500);
+            fadeAudioOut(audioMotor, 1500);
             
             statusText.style.opacity = 0;
             setTimeout(() => {
@@ -260,8 +299,7 @@ acceptBtn.addEventListener('click', () => {
     deliveryPhase.classList.add('fade-out');
     
     // Start the romantic music track
-    playerMusic.setVolume(100);
-    playerMusic.playVideo();
+    playAudio(audioMusic, 1.0);
     
     setTimeout(() => {
         deliveryPhase.classList.add('hidden');
